@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+.env
+.DS_Store
+*~
+*.swp
+crawled_progress.json
+progress.json
