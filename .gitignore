@@ -8,3 +8,4 @@ venv/
 *.swp
 crawled_progress.json
 progress.json
+_site/
