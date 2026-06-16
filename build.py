@@ -108,25 +108,59 @@ def parse_chapter_num(filename):
 
 def read_chapters(book_dir):
     chapters = []
-    for f in sorted(os.listdir(book_dir)):
-        if f.endswith('.md') and f != 'index.md':
-            path = os.path.join(book_dir, f)
-            with open(path, 'r', encoding='utf-8') as fh:
-                content = fh.read().strip()
-            title = extract_title(content)
-            if not title:
-                title = os.path.splitext(f)[0]
-            # Remove the leading # title from content for display
-            body = re.sub(r'^#+\s+.*?\n+', '', content, count=1).strip()
-            body = split_paragraphs(body)
-            html = md_to_html(body)
-            num = parse_chapter_num(f)
-            chapters.append({
-                'num': num,
-                'title': title,
-                'slug': slugify(os.path.splitext(f)[0]),
-                'html': html,
-            })
+    # Check for sub-volume directories (e.g. 上/, 中/, 下/)
+    subdirs = []
+    for entry in sorted(os.listdir(book_dir)):
+        sub_path = os.path.join(book_dir, entry)
+        if os.path.isdir(sub_path):
+            # Only consider subdirs that contain .md chapter files
+            has_md = any(f.endswith('.md') and f != 'index.md' for f in os.listdir(sub_path))
+            if has_md:
+                subdirs.append((entry, sub_path))
+
+    if subdirs:
+        # Read chapters from each sub-volume directory
+        for sub_name, sub_path in subdirs:
+            for f in sorted(os.listdir(sub_path)):
+                if f.endswith('.md') and f != 'index.md':
+                    path = os.path.join(sub_path, f)
+                    with open(path, 'r', encoding='utf-8') as fh:
+                        content = fh.read().strip()
+                    title = extract_title(content)
+                    if not title:
+                        title = os.path.splitext(f)[0]
+                    body = re.sub(r'^#+\s+.*?\n+', '', content, count=1).strip()
+                    body = split_paragraphs(body)
+                    html = md_to_html(body)
+                    num = parse_chapter_num(f)
+                    chapters.append({
+                        'num': num,
+                        'title': title,
+                        'slug': slugify(sub_name + '-' + os.path.splitext(f)[0]),
+                        'html': html,
+                        'sub_volume': sub_name,
+                    })
+    else:
+        # No sub-volumes, read directly (original behavior)
+        for f in sorted(os.listdir(book_dir)):
+            if f.endswith('.md') and f != 'index.md':
+                path = os.path.join(book_dir, f)
+                with open(path, 'r', encoding='utf-8') as fh:
+                    content = fh.read().strip()
+                title = extract_title(content)
+                if not title:
+                    title = os.path.splitext(f)[0]
+                body = re.sub(r'^#+\s+.*?\n+', '', content, count=1).strip()
+                body = split_paragraphs(body)
+                html = md_to_html(body)
+                num = parse_chapter_num(f)
+                chapters.append({
+                    'num': num,
+                    'title': title,
+                    'slug': slugify(os.path.splitext(f)[0]),
+                    'html': html,
+                    'sub_volume': None,
+                })
     chapters.sort(key=lambda c: c['num'])
     return chapters
 
@@ -215,6 +249,10 @@ def gen_chapter(book_slug, book_title, chapter, chapters, idx):
     <ul class="overlay-list">'''
     for i, ch in enumerate(chapters):
         cls = ' class="current"' if i == idx else ''
+        # Insert sub-volume separator in overlay
+        sv = ch.get('sub_volume')
+        if sv and (i == 0 or chapters[i - 1].get('sub_volume') != sv):
+            content += f'\n      <li class="ch-sep">{sv}</li>'
         content += f'\n      <li{cls}><a href="/longzu/{book_slug}/{ch["slug"]}.html">{ch["title"]}</a></li>'
     content += '''
     </ul>
@@ -233,6 +271,23 @@ def gen_chapter(book_slug, book_title, chapter, chapters, idx):
 
 def gen_book_page(book):
     title = f'{book["title"]} · {book["subtitle"]}' if book['subtitle'] else book['title']
+    # Collect sub-volume names in order
+    sub_volumes = []
+    seen = set()
+    for ch in book['chapters']:
+        sv = ch.get('sub_volume')
+        if sv and sv not in seen:
+            seen.add(sv)
+            sub_volumes.append(sv)
+    # Build chapter list with sub-volume separators
+    ch_items = ''
+    prev_sub = None
+    for ch in book['chapters']:
+        sv = ch.get('sub_volume')
+        if sv and sv != prev_sub:
+            ch_items += f'\n    <li class="ch-sep">{sv}</li>'
+            prev_sub = sv
+        ch_items += f'\n    <li><a href="/longzu/{book["slug"]}/{ch["slug"]}.html"><span class="ch-num">{ch["num"]}</span>{ch["title"]}</a></li>'
     content = f'''
 <div class="container book-page">
   <div class="book-hero">
@@ -241,10 +296,7 @@ def gen_book_page(book):
     <p class="book-hero-count">共 {len(book["chapters"])} 章</p>
   </div>
   {f'<a href="/longzu/{book["slug"]}/{book["chapters"][0]["slug"]}.html" class="start-btn">开始阅读</a>' if book["chapters"] else ""}
-  <ul class="ch-list" id="chapter-list">'''
-    for ch in book['chapters']:
-        content += f'\n    <li><a href="/longzu/{book["slug"]}/{ch["slug"]}.html"><span class="ch-num">{ch["num"]}</span>{ch["title"]}</a></li>'
-    content += '''
+  <ul class="ch-list" id="chapter-list">{ch_items}
   </ul>
 </div>'''
     return page_shell(title, content, '/longzu/', 'list-page')
